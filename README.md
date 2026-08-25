@@ -1,5 +1,7 @@
 # Smart Medicine Cabinet｜智慧藥櫃
 
+![Flutter CI](https://github.com/aa0909998429-ux/Smart_Medicine_Cabinet/actions/workflows/flutter-ci.yml/badge.svg)
+
 以 **Flutter** 製作的智慧藥櫃原型，結合中／日文 OCR、本機 SQLite 藥品搜尋、持久化庫存管理、症狀文字篩選與重複有效成分提醒。
 
 > **醫療免責聲明**：本專案為原型／學習用途，不是醫療器材，也不能取代醫師或藥師的診斷與用藥建議。症狀篩選只做文字匹配；成分檢查也不是完整的藥物交互作用判定。
@@ -23,11 +25,14 @@
 - Google ML Kit Text Recognition
 - `image_picker`
 - `path` / `path_provider`
+- GitHub Actions
 
 ## 專案結構
 
 ```text
 Smart_Medicine_Cabinet/
+├── .github/workflows/
+│   └── flutter-ci.yml                    # analyze + test
 ├── lib/
 │   ├── main.dart                         # App 入口
 │   ├── app.dart                          # MaterialApp / Theme
@@ -87,11 +92,18 @@ flutter test
 - OCR 包裝數量格式解析
 - 避免把一般年份／價格誤判成藥品數量
 
+每次 push / pull request 到 `main` 時，GitHub Actions 會自動執行：
+
+```bash
+flutter analyze
+flutter test
+```
+
 ## 工程改善
 
 這個版本已將原本集中在 `main.dart` 的功能拆成 App、Screen、Database 與 Services，讓 OCR、資料持久化、成分檢查都可以獨立測試與維護。
 
-另外，介面中的原「AI 問診」改名為「症狀篩選」，因目前實作是文字匹配，不宣稱提供 AI 診斷。
+介面中的原「AI 問診」也改名為「症狀篩選」，因目前實作是文字匹配，不宣稱提供 AI 診斷。
 
 ## Roadmap
 
@@ -101,7 +113,7 @@ flutter test
 - [ ] 更完整、具明確授權的藥品資料來源
 - [ ] 更完整的成分標準化與安全規則
 - [ ] App screenshots / demo GIF
-- [ ] GitHub Actions：`flutter analyze` + `flutter test`
+- [x] GitHub Actions：`flutter analyze` + `flutter test`
 
 ## License
 
