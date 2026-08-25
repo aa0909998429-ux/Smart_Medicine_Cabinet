@@ -11,11 +11,11 @@
 - 中／日文藥盒 OCR（相機與相簿）
 - 較嚴格的包裝數量辨識（如 `30 錠`、`24錠剤`、`20 tablets`）
 - SQLite 藥名／英文名／成分／適應症搜尋
-- 藥櫃庫存管理，並透過 `SharedPreferences` 在 App 重啟後保留
+- 藥櫃庫存透過 `SharedPreferences` 持久化，App 重啟後仍保留
 - 依症狀關鍵字篩選目前藥櫃中的藥品
 - Acetaminophen、Ibuprofen、Aspirin 的重複有效成分提醒
 - 服藥後扣除庫存與低庫存提示
-- Public repo 內附可再散布的 synthetic sample database，clone 後即可測試搜尋流程
+- 第一次啟動自動建立 synthetic demo SQLite 資料，clone 後即可展示搜尋流程
 
 ## 技術
 
@@ -36,16 +36,15 @@ Smart_Medicine_Cabinet/
 ├── lib/
 │   ├── main.dart                         # App 入口
 │   ├── app.dart                          # MaterialApp / Theme
-│   ├── db_helper.dart                    # SQLite 初始化與搜尋
+│   ├── db_helper.dart                    # SQLite 初始化、demo seed 與搜尋
 │   ├── screens/
-│   │   └── symptom_search_screen.dart    # 主要藥櫃與症狀篩選 UI
+│   │   └── symptom_search_screen.dart    # 藥櫃與症狀篩選 UI
 │   └── services/
 │       ├── cabinet_storage_service.dart  # 藥櫃持久化
 │       ├── duplicate_ingredient_checker.dart
 │       └── ocr_quantity_parser.dart
 ├── assets/
-│   ├── smart_medicine_cabinet.db         # Synthetic demo data
-│   └── README.md
+│   └── README.md                         # 真實資料集公開注意事項
 ├── test/
 │   ├── interaction_checker_test.dart
 │   └── ocr_quantity_parser_test.dart
@@ -53,13 +52,13 @@ Smart_Medicine_Cabinet/
 └── README.md
 ```
 
-## Sample database
+## Demo data 與真實資料
 
-Public Repository 內的 `assets/smart_medicine_cabinet.db` 是**刻意製作的示範資料**，只用來讓專案可以直接執行與展示搜尋／重複成分流程，不代表真實藥品資料，也不可作為用藥依據。
+Public Repository **不包含原始的大型藥品資料庫**。第一次啟動時，`DatabaseHelper` 會在 App 本機建立一個非常小的 synthetic demo database；所有記錄都標示為示範資料，只用來展示搜尋、庫存與重複有效成分流程，不能作為真實用藥資訊。
 
-原始專案曾使用較大的藥品資料庫（約 15,183 筆 Taiwan medicines + 5 筆 Japanese medicines）。由於原專案沒有附上完整資料來源、版本日期、授權條款與 attribution，該原始資料庫目前沒有放進 Public Repository。
+原始專案曾使用較大的藥品資料庫（約 15,183 筆 Taiwan medicines + 5 筆 Japanese medicines）。因原專案沒有附上完整資料來源、版本日期、授權條款與 attribution，目前不在 Public Repository 中重新散布。
 
-若未來確認資料允許再散布，請在公開前補上：
+未來若確認真實資料允許公開，請補上：
 
 - 資料來源 URL
 - 資料版本／更新日期
@@ -79,7 +78,7 @@ flutter run
 flutter create .
 ```
 
-## 測試
+## 測試與 CI
 
 ```bash
 flutter test
@@ -101,9 +100,11 @@ flutter test
 
 ## 工程改善
 
-這個版本已將原本集中在 `main.dart` 的功能拆成 App、Screen、Database 與 Services，讓 OCR、資料持久化、成分檢查都可以獨立測試與維護。
+這個版本已將原本集中在 `main.dart` 的功能拆成 App、Screen、Database 與 Services，讓 OCR、資料持久化、成分檢查都能獨立維護與測試。
 
-介面中的原「AI 問診」也改名為「症狀篩選」，因目前實作是文字匹配，不宣稱提供 AI 診斷。
+原本介面中的「AI 問診」也改名為「症狀篩選」，因目前實作是文字匹配，不宣稱提供 AI 診斷。
+
+未使用的 Generative AI 與 Barcode dependencies 已先移除，等功能真的實作時再加入，避免不必要的 dependency surface。
 
 ## Roadmap
 
@@ -113,6 +114,8 @@ flutter test
 - [ ] 更完整、具明確授權的藥品資料來源
 - [ ] 更完整的成分標準化與安全規則
 - [ ] App screenshots / demo GIF
+- [x] 持久化藥櫃庫存
+- [x] Synthetic demo database
 - [x] GitHub Actions：`flutter analyze` + `flutter test`
 
 ## License
