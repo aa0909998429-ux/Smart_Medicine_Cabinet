@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:image_picker/image_picker.dart';
 
 import '../db_helper.dart';
+import '../services/cabinet_storage_service.dart';
 import '../services/duplicate_ingredient_checker.dart';
 import '../services/ocr_quantity_parser.dart';
 
@@ -19,6 +21,7 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
   final _controller = TextEditingController();
   final _symptomController = TextEditingController();
   final _dbHelper = DatabaseHelper();
+  final _storage = CabinetStorageService();
   final _picker = ImagePicker();
 
   late final TextRecognizer _chineseRecognizer;
@@ -40,6 +43,21 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
     super.initState();
     _chineseRecognizer = TextRecognizer(script: TextRecognitionScript.chinese);
     _japaneseRecognizer = TextRecognizer(script: TextRecognitionScript.japanese);
+    unawaited(_loadCabinet());
+  }
+
+  Future<void> _loadCabinet() async {
+    final saved = await _storage.loadCabinet();
+    if (!mounted) return;
+    setState(() {
+      _myCabinet
+        ..clear()
+        ..addAll(saved);
+    });
+  }
+
+  void _saveCabinet() {
+    unawaited(_storage.saveCabinet(_myCabinet));
   }
 
   @override
@@ -49,6 +67,14 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
     _chineseRecognizer.close();
     _japaneseRecognizer.close();
     super.dispose();
+  }
+
+  void _manualSearch(String value) {
+    setState(() {
+      _scannedQuantity = null;
+      _scannedImagePath = null;
+    });
+    unawaited(_performSearch(value.trim()));
   }
 
   Future<void> _performSearch(String query, {String? imagePath}) async {
@@ -83,7 +109,6 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
           ...await _dbHelper.searchMedicine(keyword),
           ...await _dbHelper.searchJapaneseMedicine(keyword),
         ];
-
         for (final medicine in results) {
           final name = _medicineName(medicine);
           unique[name] = medicine;
@@ -94,9 +119,10 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
       final combined = unique.values
           .map((medicine) => Map<String, dynamic>.from(medicine))
           .toList()
-        ..sort((a, b) =>
-            (scores[_medicineName(b)] ?? 0)
-                .compareTo(scores[_medicineName(a)] ?? 0));
+        ..sort(
+          (a, b) => (scores[_medicineName(b)] ?? 0)
+              .compareTo(scores[_medicineName(a)] ?? 0),
+        );
 
       if (!mounted) return;
       setState(() {
@@ -191,7 +217,8 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
 
               setState(() {
                 if (index >= 0) {
-                  final current = (_myCabinet[index]['quantity'] as num?)?.toInt() ?? 0;
+                  final current =
+                      (_myCabinet[index]['quantity'] as num?)?.toInt() ?? 0;
                   _myCabinet[index]['quantity'] = current + quantity;
                 } else {
                   _myCabinet.add(
@@ -201,6 +228,7 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
                   );
                 }
               });
+              _saveCabinet();
               Navigator.pop(dialogContext);
             },
             child: const Text('確定進貨'),
@@ -237,7 +265,7 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
                 ],
               ),
             ),
-            onSubmitted: (value) => _performSearch(value.trim()),
+            onSubmitted: _manualSearch,
           ),
           const SizedBox(height: 10),
           Text(_statusMessage),
@@ -277,8 +305,8 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
       recommended = _myCabinet.where((medicine) {
         final indications =
             (medicine['適應症'] ?? medicine['indications'] ?? '').toString();
-        final name = _medicineName(medicine);
-        return indications.contains(_symptomQuery) || name.contains(_symptomQuery);
+        return indications.contains(_symptomQuery) ||
+            _medicineName(medicine).contains(_symptomQuery);
       }).toList();
     }
 
@@ -366,7 +394,6 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
       _pillsToTake,
       medicine,
     );
-
     if (warning != null) {
       showDialog<void>(
         context: context,
@@ -383,7 +410,6 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
       );
       return;
     }
-
     setState(() => _pillsToTake.add(medicine));
   }
 
@@ -401,6 +427,7 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
       }
       _pillsToTake.clear();
     });
+    _saveCabinet();
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
