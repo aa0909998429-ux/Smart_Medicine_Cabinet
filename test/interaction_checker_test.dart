@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_med_cabinet/main.dart';
+import 'package:smart_med_cabinet/services/duplicate_ingredient_checker.dart';
 
 void main() {
-  group('InteractionChecker', () {
-    test('returns null when the pillbox is empty', () {
-      final result = InteractionChecker.checkConflict(
+  group('DuplicateIngredientChecker', () {
+    test('returns null when no medicine has been selected', () {
+      final result = DuplicateIngredientChecker.checkDuplicate(
         [],
         {'中文品名': '測試藥品', '主成分略述': 'ACETAMINOPHEN'},
       );
@@ -12,8 +12,8 @@ void main() {
       expect(result, isNull);
     });
 
-    test('detects duplicate high-risk ingredients', () {
-      final currentPillbox = [
+    test('detects duplicated monitored ingredients', () {
+      final selectedMedicines = [
         {'中文品名': '藥品 A', '主成分略述': 'ACETAMINOPHEN 500 MG'},
       ];
       final newMedicine = {
@@ -21,8 +21,8 @@ void main() {
         '主成分略述': 'CAFFEINE, ACETAMINOPHEN',
       };
 
-      final result = InteractionChecker.checkConflict(
-        currentPillbox,
+      final result = DuplicateIngredientChecker.checkDuplicate(
+        selectedMedicines,
         newMedicine,
       );
 
@@ -30,8 +30,8 @@ void main() {
       expect(result, contains('ACETAMINOPHEN'));
     });
 
-    test('allows medicines without duplicated configured ingredients', () {
-      final currentPillbox = [
+    test('allows medicines without duplicated monitored ingredients', () {
+      final selectedMedicines = [
         {'中文品名': '藥品 A', '主成分略述': 'IBUPROFEN'},
       ];
       final newMedicine = {
@@ -39,8 +39,8 @@ void main() {
         '主成分略述': 'ACETAMINOPHEN',
       };
 
-      final result = InteractionChecker.checkConflict(
-        currentPillbox,
+      final result = DuplicateIngredientChecker.checkDuplicate(
+        selectedMedicines,
         newMedicine,
       );
 
