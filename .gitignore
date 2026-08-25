@@ -1,0 +1,52 @@
+# OS / editor files
+.DS_Store
+*.swp
+*.swo
+*.log
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# Dart / Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+/coverage/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+
+# Generated symbol / obfuscation files
+app.*.symbols
+app.*.map.json
+
+# Local machine configuration
+**/local.properties
+.env
+.env.*
+!.env.example
+
+# Android / signing secrets
+/android/.gradle/
+/android/.kotlin/
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
+key.properties
+**/*.keystore
+**/*.jks
+
+# Flutter generated platform files
+**/Flutter/ephemeral/
+**/flutter/ephemeral/
+**/.plugin_symlinks/
+**/Pods/
+**/DerivedData/
+
+# SQLite GUI project metadata (the .db asset itself is intentionally tracked)
+*.sqbpro
