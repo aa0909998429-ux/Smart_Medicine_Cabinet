@@ -26,9 +26,7 @@ class DatabaseHelper {
     );
 
     if (!await File(databasePath).exists()) {
-      final data = await rootBundle.load(
-        join('assets', 'smart_medicine_cabinet.db'),
-      );
+      final data = await rootBundle.load('assets/smart_medicine_cabinet.db');
       final bytes = data.buffer.asUint8List(
         data.offsetInBytes,
         data.lengthInBytes,
