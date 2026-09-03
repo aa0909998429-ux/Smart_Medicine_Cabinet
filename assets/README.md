@@ -1,14 +1,27 @@
-# Data note
+# 藥品資料來源與授權
 
-The public repository does **not** redistribute the original medicine database.
+`data/tfda_common_drugs.json` 是衛生福利部食品藥物管理署「全部藥品許可證資料集」的衍生子集。
 
-For a clean clone, `DatabaseHelper` creates a tiny synthetic SQLite demo database on first launch. Those records are clearly labeled as demo data and exist only to exercise search, cabinet, and duplicate-ingredient flows.
+- 資料集頁面：https://data.gov.tw/dataset/9122
+- 原始資料：https://data.fda.gov.tw/data/opendata/export/36/csv
+- 提供機關：衛生福利部食品藥物管理署
+- 授權：政府資料開放授權條款－第1版
+- 本次快照：2026-09-02
+- 衍生資料筆數：5,297 張有效許可證
 
-The original project used a much larger medicine dataset. Before publishing any real dataset, document and verify:
+## 篩選規則
 
-- source URL
-- dataset version/date
-- redistribution license
-- attribution requirements
+只保留在快照日符合以下所有條件的記錄：
 
-Do not add third-party medicine data to this public repository unless redistribution is permitted.
+1. `註銷狀態` 為空白。
+2. `有效日期` 不早於快照日。
+3. `藥品類別` 為「成藥」、「乙類成藥」或「醫師藥師藥劑生指示藥品」。
+4. 同一許可證的不同包裝列合併為一筆，保留所有包裝及條碼文字。
+
+可執行下列指令重新下載並產生資料：
+
+```powershell
+.\tool\update_tfda_dataset.ps1
+```
+
+資料集會定期變動。App 顯示的是上述快照，不代表許可證在使用當下仍有效；使用藥品前仍須核對實體包裝、最新官方資料並諮詢醫師或藥師。

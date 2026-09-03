@@ -18,6 +18,7 @@
 .pub/
 /build/
 /coverage/
+.tmp/
 **/doc/api/
 **/ios/Flutter/.last_build_id
 

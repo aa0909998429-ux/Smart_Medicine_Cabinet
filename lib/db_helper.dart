@@ -1,8 +1,14 @@
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 class DatabaseHelper {
+  static const datasetAsset = 'assets/data/tfda_common_drugs.json';
+  static const databaseVersion = 2;
+
   static final DatabaseHelper _instance = DatabaseHelper._internal();
   static Database? _database;
 
@@ -24,20 +30,37 @@ class DatabaseHelper {
 
     return openDatabase(
       databasePath,
-      version: 1,
-      onCreate: _createDemoDatabase,
+      version: databaseVersion,
+      onCreate: _createDatabase,
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('DROP TABLE IF EXISTS medicines');
+          await db.execute('DROP TABLE IF EXISTS japanese_medicines');
+          await db.execute('DROP TABLE IF EXISTS dataset_metadata');
+          await _createDatabase(db, newVersion);
+        }
+      },
     );
   }
 
-  Future<void> _createDemoDatabase(Database db, int version) async {
+  Future<void> _createDatabase(Database db, int version) async {
     await db.execute('''
       CREATE TABLE medicines (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        permit_number TEXT NOT NULL UNIQUE,
         中文品名 TEXT NOT NULL,
         英文品名 TEXT,
         主成分略述 TEXT,
         適應症 TEXT,
-        用法用量 TEXT
+        用法用量 TEXT,
+        藥品類別 TEXT,
+        劑型 TEXT,
+        包裝 TEXT,
+        許可證有效日期 TEXT,
+        申請商名稱 TEXT,
+        包裝與國際條碼 TEXT,
+        aliases TEXT,
+        source_url TEXT NOT NULL
       )
     ''');
 
@@ -52,36 +75,66 @@ class DatabaseHelper {
       )
     ''');
 
-    final batch = db.batch();
-    batch.insert('medicines', {
-      '中文品名': '示範退燒止痛錠 A',
-      '英文品名': 'Demo Fever & Pain Tablet A',
-      '主成分略述': 'ACETAMINOPHEN 500 MG',
-      '適應症': '示範資料：頭痛、發燒',
-      '用法用量': '示範資料，請勿作為醫療建議',
-    });
-    batch.insert('medicines', {
-      '中文品名': '示範止痛錠 B',
-      '英文品名': 'Demo Pain Tablet B',
-      '主成分略述': 'IBUPROFEN 200 MG',
-      '適應症': '示範資料：頭痛、肌肉痠痛',
-      '用法用量': '示範資料，請勿作為醫療建議',
-    });
-    batch.insert('medicines', {
-      '中文品名': '示範感冒錠 C',
-      '英文品名': 'Demo Cold Tablet C',
-      '主成分略述': 'ACETAMINOPHEN 250 MG',
-      '適應症': '示範資料：感冒不適、頭痛',
-      '用法用量': '示範資料，請勿作為醫療建議',
-    });
-    batch.insert('japanese_medicines', {
-      'japanese_name': 'デモかぜ薬A',
-      'chinese_name': '示範日本感冒藥 A',
-      'ingredients': 'DEMO INGREDIENT',
-      'indications': '示範資料：感冒不適',
-      'dosage': '示範資料，請勿作為醫療建議',
-    });
-    await batch.commit(noResult: true);
+    await db.execute('''
+      CREATE TABLE dataset_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    ''');
+
+    await _importTfdaDataset(db);
+  }
+
+  Future<void> _importTfdaDataset(Database db) async {
+    final raw = await rootBundle.loadString(datasetAsset);
+    final payload = jsonDecode(raw) as Map<String, dynamic>;
+    final metadata = Map<String, dynamic>.from(payload['metadata'] as Map);
+    final medicines = (payload['medicines'] as List).whereType<Map>();
+    final sourceUrl = metadata['source_url']?.toString() ?? '';
+
+    var batch = db.batch();
+    var pending = 0;
+    for (final rawMedicine in medicines) {
+      final medicine = Map<String, dynamic>.from(rawMedicine);
+      final aliases =
+          (medicine['aliases'] as List?)
+              ?.map((value) => value.toString())
+              .join(' ') ??
+          '';
+      batch.insert('medicines', {
+        'permit_number': medicine['permit_number'],
+        '中文品名': medicine['chinese_name'],
+        '英文品名': medicine['english_name'],
+        '主成分略述': medicine['ingredients'],
+        '適應症': medicine['indications'],
+        '用法用量': medicine['dosage'],
+        '藥品類別': medicine['category'],
+        '劑型': medicine['dosage_form'],
+        '包裝': medicine['packaging'],
+        '許可證有效日期': medicine['license_expiry_date'],
+        '申請商名稱': medicine['applicant_name'],
+        '包裝與國際條碼': medicine['barcodes'],
+        'aliases': aliases,
+        'source_url': sourceUrl,
+      });
+      pending++;
+
+      if (pending >= 400) {
+        await batch.commit(noResult: true);
+        batch = db.batch();
+        pending = 0;
+      }
+    }
+    if (pending > 0) await batch.commit(noResult: true);
+
+    final metadataBatch = db.batch();
+    for (final entry in metadata.entries) {
+      metadataBatch.insert('dataset_metadata', {
+        'key': entry.key,
+        'value': entry.value.toString(),
+      });
+    }
+    await metadataBatch.commit(noResult: true);
   }
 
   Future<List<Map<String, dynamic>>> searchMedicine(String keyword) async {
@@ -90,29 +143,29 @@ class DatabaseHelper {
 
     return db.query(
       'medicines',
-      where: '中文品名 LIKE ? OR 英文品名 LIKE ? OR 主成分略述 LIKE ? OR 適應症 LIKE ?',
-      whereArgs: [pattern, pattern, pattern, pattern],
+      where:
+          '中文品名 LIKE ? OR 英文品名 LIKE ? OR aliases LIKE ? OR permit_number LIKE ? OR 主成分略述 LIKE ? OR 適應症 LIKE ?',
+      whereArgs: [pattern, pattern, pattern, pattern, pattern, pattern],
+      orderBy: '中文品名 COLLATE NOCASE',
       limit: 20,
     );
   }
 
-  Future<List<Map<String, dynamic>>> searchMedicineBySymptom(
-    String symptom,
-  ) {
+  Future<List<Map<String, dynamic>>> searchMedicineBySymptom(String symptom) {
     return searchMedicine(symptom);
   }
 
   Future<List<Map<String, dynamic>>> searchJapaneseMedicine(
     String keyword,
   ) async {
-    final db = await database;
-    final pattern = '%${keyword.trim()}%';
+    return const [];
+  }
 
-    return db.query(
-      'japanese_medicines',
-      where: 'japanese_name LIKE ? OR chinese_name LIKE ? OR ingredients LIKE ? OR indications LIKE ?',
-      whereArgs: [pattern, pattern, pattern, pattern],
-      limit: 20,
-    );
+  Future<Map<String, String>> loadDatasetMetadata() async {
+    final db = await database;
+    final rows = await db.query('dataset_metadata');
+    return {
+      for (final row in rows) row['key'].toString(): row['value'].toString(),
+    };
   }
 }

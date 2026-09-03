@@ -38,7 +38,6 @@ class DuplicateIngredientChecker {
   }
 
   static String _nameOf(Map<String, dynamic> medicine) {
-    return (medicine['中文品名'] ?? medicine['chinese_name'] ?? '未知藥品')
-        .toString();
+    return (medicine['中文品名'] ?? medicine['chinese_name'] ?? '未知藥品').toString();
   }
 }
