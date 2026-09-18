@@ -2,7 +2,7 @@
 
 ![Flutter CI](https://github.com/aa0909998429-ux/Smart_Medicine_Cabinet/actions/workflows/flutter-ci.yml/badge.svg)
 
-以 **Flutter** 製作的智慧藥櫃原型，結合中／日文 OCR、本機 SQLite 藥品搜尋、持久化庫存管理、症狀文字篩選與重複有效成分提醒。
+以 **Flutter** 製作的智慧藥櫃原型，結合中／日文 OCR、條碼掃描、本機 SQLite 藥品搜尋、持久化庫存管理、症狀文字篩選與重複有效成分提醒。
 
 > **醫療免責聲明**：本專案為原型／學習用途，不是醫療器材，也不能取代醫師或藥師的診斷與用藥建議。症狀篩選只做文字匹配；成分檢查也不是完整的藥物交互作用判定。
 
@@ -13,9 +13,13 @@
 - 顯示最近一次 OCR 原文與圖片；入庫後把圖片保存於 App 私有目錄
 - 較嚴格的包裝數量辨識（如 `30 錠`、`24錠剤`、`20 tablets`）
 - SQLite 中文名／英文名／別名／許可證／成分／適應症搜尋
+- EAN／UPC／Code 128／Data Matrix／QR code 掃描與本機條碼欄位查詢
 - 藥櫃庫存透過 `SharedPreferences` 持久化，App 重啟後仍保留
+- 可編輯每批庫存的數量與有效期限
+- 庫存與服藥紀錄保留上一份有效本機資料，主要資料損壞時自動回復
+- 可匯出／匯入經格式驗證的 JSON 備份；備份刻意排除藥盒照片與本機路徑
 - 依症狀關鍵字篩選目前藥櫃中的藥品
-- Acetaminophen、Ibuprofen、Aspirin 的重複有效成分提醒
+- 解析官方有效成分文字並提醒相同成分；包含 Acetaminophen／Paracetamol、Ibuprofen、Aspirin 等常見同義名稱正規化
 - 服藥後扣除庫存與低庫存提示
 - 服藥紀錄持久化，保留服用時間、藥名與數量
 - 可由使用者清除全部服藥紀錄
@@ -31,6 +35,8 @@
 - `shared_preferences`
 - Google ML Kit Text Recognition
 - `image_picker`
+- `mobile_scanner`
+- `file_selector` / `share_plus`
 - `path` / `path_provider`
 - GitHub Actions
 
@@ -45,8 +51,10 @@ Smart_Medicine_Cabinet/
 │   ├── app.dart                          # MaterialApp / Theme
 │   ├── db_helper.dart                    # SQLite 初始化、TFDA 匯入與搜尋
 │   ├── screens/
-│   │   └── symptom_search_screen.dart    # 藥櫃與症狀篩選 UI
+│   │   ├── barcode_scanner_screen.dart   # 條碼／QR 掃描 UI
+│   │   └── symptom_search_screen.dart    # 藥櫃、OCR、備份與症狀篩選 UI
 │   └── services/
+│       ├── cabinet_backup_service.dart   # JSON 備份驗證與隱私清理
 │       ├── cabinet_storage_service.dart  # 藥櫃持久化
 │       ├── duplicate_ingredient_checker.dart
 │       ├── inventory_status.dart
@@ -93,6 +101,8 @@ Android 已在 App 模組明確加入 ML Kit 中文與日文辨識模型；iOS `
 
 拍攝藥盒時請讓藥名正面朝向鏡頭、填滿畫面、避免反光與手震。OCR 結果只用來協助搜尋；加入藥櫃前仍須核對畫面上的正式品名、許可證字號、數量與實體有效期限。
 
+掃描器可讀常見一維條碼、Data Matrix 與 QR code，但目前內建 TFDA 快照的「包裝與國際條碼」欄位沒有可用對照值，因此多數商品掃描後會提示改用 OCR。App 不會猜測藥名，也不會自動開啟 QR code 網址。
+
 入庫時必須依照實體包裝選擇有效期限。同藥名但不同效期會保留為不同批次；已過期或舊版資料中缺少效期的批次不能加入服藥紀錄。
 
 如果 clone 後缺少平台骨架，可先執行：
@@ -116,6 +126,9 @@ flutter test
 - 避免把一般年份／價格誤判成藥品數量
 - TFDA 資料來源、授權、許可證唯一性與分類完整性
 - 大正百保能中／英／日別名存在性
+- 庫存與服藥紀錄的備援資料回復
+- 備份匯出／匯入 round trip、格式驗證與照片路徑移除
+- 多種官方成分字串與同義名稱的重複比對
 
 每次 push / pull request 到 `main` 時，GitHub Actions 會自動執行：
 
@@ -131,15 +144,16 @@ flutter build apk --debug
 
 原本介面中的「AI 問診」也改名為「症狀篩選」，因目前實作是文字匹配，不宣稱提供 AI 診斷。
 
-未使用的 Generative AI 與 Barcode dependencies 已先移除，等功能真的實作時再加入，避免不必要的 dependency surface。
+未使用的 Generative AI dependency 已移除；條碼功能則使用實際整合並通過編譯檢查的掃描套件。
 
 ## Roadmap
 
 - [x] 藥品有效期限管理與到期提醒
 - [x] 服藥紀錄（medication history）
-- [ ] Barcode / QR code 掃描流程
+- [x] Barcode / QR code 掃描流程
 - [x] 具明確來源與授權的 TFDA 非處方／指示藥資料
-- [ ] 更完整的成分標準化與安全規則
+- [x] 全部官方有效成分文字比對與常見同義名稱標準化
+- [x] 庫存／服藥紀錄 JSON 備份與匯入
 - [ ] App screenshots / demo GIF
 - [x] 持久化藥櫃庫存
 - [x] TFDA 離線資料匯入與資料庫升級
@@ -151,4 +165,4 @@ flutter build apk --debug
 
 ## 發布注意事項
 
-目前仍是原型，不應直接以醫療產品名義公開發行。實機測試、簽章、隱私政策、藥品資料授權與專業內容審查等必要事項請見 [發布前安全檢查清單](docs/RELEASE_CHECKLIST.md)。
+目前仍是原型，不應直接以醫療產品名義公開發行。請先閱讀[隱私說明](PRIVACY.md)；實機測試、正式識別碼與簽章、藥品資料授權及專業內容審查等必要事項請見[發布前安全檢查清單](docs/RELEASE_CHECKLIST.md)。

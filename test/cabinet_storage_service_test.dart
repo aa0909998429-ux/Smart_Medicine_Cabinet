@@ -36,4 +36,32 @@ void main() {
     });
     expect(await CabinetStorageService().loadCabinet(), isEmpty);
   });
+
+  test(
+    'restores the previous valid cabinet when primary data is corrupt',
+    () async {
+      final service = CabinetStorageService();
+      final first = [
+        {
+          'inventory_id': 'batch-1',
+          '中文品名': '第一版藥品',
+          'quantity': 10,
+          'expiry_date': '2027-09-02',
+        },
+      ];
+      await service.saveCabinet(first);
+      await service.saveCabinet([
+        {...first.single, 'quantity': 9},
+      ]);
+
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(CabinetStorageService.cabinetKey, '{broken');
+
+      expect(await service.loadCabinet(), first);
+      expect(
+        jsonDecode(preferences.getString(CabinetStorageService.cabinetKey)!),
+        first,
+      );
+    },
+  );
 }

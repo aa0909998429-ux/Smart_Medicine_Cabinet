@@ -49,4 +49,39 @@ void main() {
 
     expect(await service.loadHistory(), isEmpty);
   });
+
+  test(
+    'restores the previous valid history when primary data is corrupt',
+    () async {
+      final service = MedicationHistoryService();
+      final first = [
+        {
+          'medicine_name': '第一筆藥品',
+          'quantity': 1,
+          'taken_at': '2026-09-02T12:00:00.000',
+        },
+      ];
+      await service.saveHistory(first);
+      await service.saveHistory([
+        {
+          'medicine_name': '第二筆藥品',
+          'quantity': 1,
+          'taken_at': '2026-09-03T12:00:00.000',
+        },
+        ...first,
+      ]);
+
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(
+        MedicationHistoryService.historyKey,
+        'broken',
+      );
+
+      expect(await service.loadHistory(), first);
+      expect(
+        jsonDecode(preferences.getString(MedicationHistoryService.historyKey)!),
+        first,
+      );
+    },
+  );
 }

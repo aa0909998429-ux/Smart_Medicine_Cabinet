@@ -1,20 +1,25 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../db_helper.dart';
+import '../services/cabinet_backup_service.dart';
 import '../services/cabinet_storage_service.dart';
 import '../services/duplicate_ingredient_checker.dart';
 import '../services/inventory_status.dart';
 import '../services/medication_history_service.dart';
 import '../services/medicine_search_ranker.dart';
 import '../services/ocr_quantity_parser.dart';
+import 'barcode_scanner_screen.dart';
 
 class SymptomSearchScreen extends StatefulWidget {
   const SymptomSearchScreen({super.key});
@@ -29,6 +34,7 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
   final _dbHelper = DatabaseHelper();
   final _storage = CabinetStorageService();
   final _historyStorage = MedicationHistoryService();
+  final _backupService = CabinetBackupService();
   final _picker = ImagePicker();
 
   late final TextRecognizer _chineseRecognizer;
@@ -248,6 +254,52 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
         : '相簿暫時無法使用，請稍後再試。';
   }
 
+  Future<void> _scanBarcode() async {
+    final barcode = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const BarcodeScannerScreen()),
+    );
+    if (barcode == null || barcode.trim().isEmpty || !mounted) return;
+
+    final normalized = barcode.trim();
+    setState(() {
+      _isLoading = true;
+      _lastRecognizedText = null;
+      _scannedImagePath = null;
+      _scannedQuantity = null;
+      _controller.text = normalized.length > 120
+          ? normalized.substring(0, 120)
+          : normalized;
+      _searchResults = [];
+      _statusMessage = '正在比對 TFDA 官方條碼欄位...';
+    });
+
+    try {
+      final results = await _dbHelper.searchMedicineByBarcode(normalized);
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _searchResults = results;
+        _statusMessage = results.isEmpty
+            ? '已讀到條碼「${_shortBarcode(normalized)}」，但目前官方資料沒有對照品項。請改用藥名或 OCR，勿只憑條碼猜測。'
+            : '條碼比對完成，共找到 ${results.length} 筆官方許可品項；入庫前仍須核對實體藥名與許可證。';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _statusMessage = '條碼比對失敗，請稍後再試或改用 OCR。';
+      });
+    }
+  }
+
+  String _shortBarcode(String value) {
+    const maxLength = 32;
+    return value.length <= maxLength
+        ? value
+        : '${value.substring(0, maxLength)}…';
+  }
+
   Future<void> _addToCabinet(Map<String, dynamic> medicine) async {
     final boxController = TextEditingController(text: '1');
     DateTime? expiryDate;
@@ -265,6 +317,7 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
                 TextField(
                   controller: boxController,
                   keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   decoration: InputDecoration(
                     labelText: _scannedQuantity != null
                         ? '購買盒數（每盒 $_scannedQuantity 單位）'
@@ -403,6 +456,84 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
     boxController.dispose();
   }
 
+  Future<void> _confirmOcrMatchAndAdd(Map<String, dynamic> medicine) async {
+    final recognizedText = _lastRecognizedText;
+    if (recognizedText == null) {
+      await _addToCabinet(medicine);
+      return;
+    }
+
+    final imagePath = _scannedImagePath;
+    final image = imagePath == null ? null : File(imagePath);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('確認 OCR 藥品配對'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (image != null && image.existsSync()) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(
+                    image,
+                    width: double.infinity,
+                    height: 160,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              Card(
+                color: Theme.of(context).colorScheme.tertiaryContainer,
+                child: const ListTile(
+                  leading: Icon(Icons.fact_check_outlined),
+                  title: Text('請對照實體包裝'),
+                  subtitle: Text('OCR 與搜尋結果可能誤判；藥名及許可證都相符後才能入庫。'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text('準備加入', style: Theme.of(context).textTheme.labelLarge),
+              SelectableText(
+                '${_medicineName(medicine)}\n'
+                '許可證：${medicine['permit_number'] ?? '未標示'}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text('查看 OCR 辨識原文'),
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SelectableText(recognizedText),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('不相符，返回'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.check),
+            label: const Text('已核對，繼續'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await _addToCabinet(medicine);
+    }
+  }
+
   Future<String?> _persistScannedImage(String inventoryId) async {
     final sourcePath = _scannedImagePath;
     if (sourcePath == null || sourcePath.isEmpty) return null;
@@ -449,6 +580,11 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
               suffixIcon: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  IconButton(
+                    tooltip: '掃描條碼或 QR Code',
+                    icon: const Icon(Icons.qr_code_scanner),
+                    onPressed: _scanBarcode,
+                  ),
                   IconButton(
                     tooltip: '從相簿辨識',
                     icon: const Icon(Icons.photo_library),
@@ -533,7 +669,8 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
                               onTap: () => _showMedicineDetails(medicine),
                               trailing: IconButton.filledTonal(
                                 tooltip: '放入藥櫃',
-                                onPressed: () => _addToCabinet(medicine),
+                                onPressed: () =>
+                                    unawaited(_confirmOcrMatchAndAdd(medicine)),
                                 icon: const Icon(Icons.add),
                               ),
                             ),
@@ -575,15 +712,198 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             _statusChip(status, medicine),
-            IconButton(
-              tooltip: '移除此批次',
-              icon: const Icon(Icons.delete_outline),
-              onPressed: () => _removeCabinetItem(medicine),
+            PopupMenuButton<String>(
+              tooltip: '管理此庫存批次',
+              onSelected: (action) {
+                if (action == 'edit') {
+                  unawaited(_editCabinetItem(medicine));
+                } else if (action == 'remove') {
+                  unawaited(_removeCabinetItem(medicine));
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: ListTile(
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('修改數量與效期'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'remove',
+                  child: ListTile(
+                    leading: Icon(Icons.delete_outline),
+                    title: Text('移除此批次'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _editCabinetItem(Map<String, dynamic> medicine) async {
+    final quantityController = TextEditingController(
+      text: ((medicine['quantity'] as num?)?.toInt() ?? 0).toString(),
+    );
+    final now = DateTime.now();
+    final firstDate = DateTime(2000);
+    final lastDate = DateTime(now.year + 10, now.month, now.day);
+    var expiryDate = DateTime.tryParse(
+      medicine['expiry_date']?.toString() ?? '',
+    );
+    if (expiryDate != null &&
+        (expiryDate.isBefore(firstDate) || expiryDate.isAfter(lastDate))) {
+      expiryDate = null;
+    }
+    String? validationMessage;
+    var isSaving = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('修改庫存批次'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _medicineName(medicine),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: quantityController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: '目前總數量',
+                    border: OutlineInputBorder(),
+                    suffixText: '單位',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.event),
+                  title: Text(
+                    expiryDate == null
+                        ? '選擇包裝上的有效期限'
+                        : '有效期限：${_formatDate(expiryDate!)}',
+                  ),
+                  subtitle: const Text('請依實體包裝修正；過期批次會禁止服用'),
+                  onTap: isSaving
+                      ? null
+                      : () async {
+                          final selected = await showDatePicker(
+                            context: dialogContext,
+                            initialDate:
+                                expiryDate ??
+                                now.add(const Duration(days: 365)),
+                            firstDate: firstDate,
+                            lastDate: lastDate,
+                          );
+                          if (selected != null) {
+                            setDialogState(() {
+                              expiryDate = selected;
+                              validationMessage = null;
+                            });
+                          }
+                        },
+                ),
+                if (validationMessage != null)
+                  Text(
+                    validationMessage!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSaving ? null : () => Navigator.pop(dialogContext),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      final quantity = int.tryParse(quantityController.text);
+                      if (quantity == null ||
+                          quantity <= 0 ||
+                          expiryDate == null) {
+                        setDialogState(() {
+                          validationMessage = expiryDate == null
+                              ? '請選擇有效期限'
+                              : '數量必須是大於 0 的整數';
+                        });
+                        return;
+                      }
+
+                      final index = _myCabinet.indexWhere(
+                        (item) => identical(item, medicine),
+                      );
+                      if (index < 0) {
+                        setDialogState(() {
+                          validationMessage = '找不到這個庫存批次，請關閉後重試';
+                        });
+                        return;
+                      }
+
+                      setDialogState(() => isSaving = true);
+                      final updated = _myCabinet
+                          .map(Map<String, dynamic>.from)
+                          .toList();
+                      updated[index]
+                        ..['quantity'] = quantity
+                        ..['expiry_date'] = _dateOnlyIso(expiryDate!);
+
+                      try {
+                        await _storage.saveCabinet(updated);
+                        if (!mounted) return;
+                        setState(() {
+                          _pillsToTake.removeWhere(
+                            (item) => identical(item, medicine),
+                          );
+                          _myCabinet
+                            ..clear()
+                            ..addAll(updated);
+                        });
+                        if (dialogContext.mounted) {
+                          Navigator.pop(dialogContext);
+                        }
+                        ScaffoldMessenger.of(this.context).showSnackBar(
+                          const SnackBar(content: Text('庫存批次已更新')),
+                        );
+                      } catch (_) {
+                        if (dialogContext.mounted) {
+                          setDialogState(() {
+                            isSaving = false;
+                            validationMessage = '儲存失敗，原有庫存未變更';
+                          });
+                        }
+                      }
+                    },
+              child: isSaving
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('儲存修改'),
+            ),
+          ],
+        ),
+      ),
+    );
+    quantityController.dispose();
   }
 
   Widget _buildSymptomMatchView() {
@@ -1011,6 +1331,165 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
     }
   }
 
+  void _showBackupOptions() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('資料備份與復原'),
+        content: const Text(
+          '備份包含藥櫃庫存及服藥紀錄。藥盒照片含有較多隱私且檔案較大，因此不會放入備份。\n\n'
+          '備份檔含有健康相關資訊，請只存放在自己信任的位置。',
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              unawaited(_importBackup());
+            },
+            icon: const Icon(Icons.settings_backup_restore),
+            label: const Text('選擇備份復原'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              unawaited(_exportBackup());
+            },
+            icon: const Icon(Icons.ios_share),
+            label: const Text('匯出備份'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _exportBackup() async {
+    try {
+      final now = DateTime.now();
+      final date = _dateOnlyIso(now);
+      final fileName = 'smart-medicine-cabinet-$date.json';
+      final raw = _backupService.encode(
+        cabinet: _myCabinet,
+        medicationHistory: _medicationHistory,
+        exportedAt: now,
+      );
+      final renderBox = context.findRenderObject() as RenderBox?;
+      final shareOrigin = renderBox == null
+          ? null
+          : renderBox.localToGlobal(Offset.zero) & renderBox.size;
+      final result = await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(
+              Uint8List.fromList(utf8.encode(raw)),
+              mimeType: 'application/json',
+            ),
+          ],
+          fileNameOverrides: [fileName],
+          subject: '智慧藥櫃資料備份',
+          text: '智慧藥櫃 $date 備份；內容可能包含健康資訊，請妥善保管。',
+          sharePositionOrigin: shareOrigin,
+        ),
+      );
+      if (!mounted || result.status == ShareResultStatus.dismissed) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('備份檔已交給所選位置')));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('無法匯出備份，請稍後再試')));
+    }
+  }
+
+  Future<void> _importBackup() async {
+    try {
+      const backupType = XTypeGroup(
+        label: '智慧藥櫃 JSON 備份',
+        extensions: ['json'],
+        mimeTypes: ['application/json'],
+        uniformTypeIdentifiers: ['public.json'],
+      );
+      final file = await openFile(
+        acceptedTypeGroups: const [backupType],
+        confirmButtonText: '選擇備份',
+      );
+      if (file == null || !mounted) return;
+      if (await file.length() > CabinetBackupService.maxBackupBytes) {
+        throw const FormatException('備份檔超過 10 MB 限制');
+      }
+
+      final backup = _backupService.decode(await file.readAsString());
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('以備份取代目前資料？'),
+          content: Text(
+            '備份日期：${_formatDate(backup.exportedAt.toLocal())}\n'
+            '庫存批次：${backup.cabinet.length}\n'
+            '服藥紀錄：${backup.medicationHistory.length}\n\n'
+            '目前資料會先保留為自動備援。備份不包含藥盒照片。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('確認復原'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+
+      final previousCabinet = _myCabinet
+          .map(Map<String, dynamic>.from)
+          .toList();
+      var cabinetSaved = false;
+      try {
+        await _storage.saveCabinet(backup.cabinet);
+        cabinetSaved = true;
+        await _historyStorage.saveHistory(backup.medicationHistory);
+      } catch (_) {
+        if (cabinetSaved) {
+          try {
+            await _storage.saveCabinet(previousCabinet);
+          } catch (_) {
+            // The automatic backup still retains the prior valid cabinet.
+          }
+        }
+        rethrow;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _myCabinet
+          ..clear()
+          ..addAll(backup.cabinet);
+        _medicationHistory
+          ..clear()
+          ..addAll(backup.medicationHistory);
+        _pillsToTake.clear();
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('資料已從備份復原')));
+    } on FormatException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('無法復原：${error.message}')));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('無法讀取或復原備份，原資料未變更')));
+    }
+  }
+
   void _showDatasetInformation() {
     showDialog<void>(
       context: context,
@@ -1114,6 +1593,11 @@ class _SymptomSearchScreenState extends State<SymptomSearchScreen> {
           _ => '服藥紀錄',
         }),
         actions: [
+          IconButton(
+            tooltip: '資料備份與復原',
+            onPressed: _showBackupOptions,
+            icon: const Icon(Icons.backup_outlined),
+          ),
           IconButton(
             tooltip: '藥品資料來源',
             onPressed: _showDatasetInformation,

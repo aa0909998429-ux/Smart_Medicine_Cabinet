@@ -12,7 +12,7 @@ void main() {
       expect(result, isNull);
     });
 
-    test('detects duplicated monitored ingredients', () {
+    test('detects duplicated ingredients despite strength formatting', () {
       final selectedMedicines = [
         {'中文品名': '藥品 A', '主成分略述': 'ACETAMINOPHEN 500 MG'},
       ];
@@ -24,6 +24,32 @@ void main() {
       );
 
       expect(result, isNotNull);
+      expect(result, contains('ACETAMINOPHEN'));
+    });
+
+    test('detects duplicated ingredients beyond the original three', () {
+      final result = DuplicateIngredientChecker.checkDuplicate(
+        [
+          {'中文品名': '綜合感冒藥 A', '主成分略述': 'CHLORPHENIRAMINE MALEATE;;CAFFEINE'},
+        ],
+        {
+          '中文品名': '綜合感冒藥 B',
+          '主成分略述': 'DEXTROMETHORPHAN HBR;;CHLORPHENIRAMINE MALEATE',
+        },
+      );
+
+      expect(result, contains('CHLORPHENIRAMINE MALEATE'));
+      expect(result, contains('只是成分文字比對'));
+    });
+
+    test('normalizes acetaminophen and paracetamol as the same ingredient', () {
+      final result = DuplicateIngredientChecker.checkDuplicate(
+        [
+          {'中文品名': '藥品 A', '主成分略述': 'PARACETAMOL 500 MG'},
+        ],
+        {'中文品名': '藥品 B', '主成分略述': 'ACETAMINOPHEN'},
+      );
+
       expect(result, contains('ACETAMINOPHEN'));
     });
 

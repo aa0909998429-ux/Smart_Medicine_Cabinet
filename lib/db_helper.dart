@@ -155,6 +155,22 @@ class DatabaseHelper {
     return searchMedicine(symptom);
   }
 
+  Future<List<Map<String, dynamic>>> searchMedicineByBarcode(
+    String barcode,
+  ) async {
+    final normalized = barcode.trim();
+    if (normalized.isEmpty) return const [];
+
+    final db = await database;
+    return db.query(
+      'medicines',
+      where: '包裝與國際條碼 LIKE ?',
+      whereArgs: ['%$normalized%'],
+      orderBy: '中文品名 COLLATE NOCASE',
+      limit: 20,
+    );
+  }
+
   Future<List<Map<String, dynamic>>> searchJapaneseMedicine(
     String keyword,
   ) async {
